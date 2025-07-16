@@ -5,6 +5,7 @@ A comprehensive stock prediction system with advanced LSTM architectures, hyperp
 ## 🎯 Key Improvements Over Basic LSTM
 
 ### 🔧 Model Architecture Enhancements
+
 - **Attention Mechanism**: Multi-head attention for better sequence modeling
 - **Batch Normalization**: Stabilizes training and speeds convergence
 - **Residual Connections**: Helps with gradient flow in deeper networks
@@ -12,6 +13,7 @@ A comprehensive stock prediction system with advanced LSTM architectures, hyperp
 - **Advanced Weight Initialization**: Xavier/Orthogonal initialization
 
 ### 📊 Feature Engineering
+
 - **Technical Indicators**: RSI, MACD, Bollinger Bands, Stochastic Oscillator
 - **Multiple Moving Averages**: 5, 10, 20, 50-day periods
 - **Volatility Features**: Rolling standard deviation of returns
@@ -19,12 +21,14 @@ A comprehensive stock prediction system with advanced LSTM architectures, hyperp
 - **Volume Analysis**: Volume changes and moving averages
 
 ### 🔍 Hyperparameter Optimization
+
 - **Automated Tuning**: Grid search with early stopping
 - **Parameter Space**: Hidden size, layers, dropout, learning rate, sequence length
 - **Cross-Validation**: Proper train/validation/test splits
 - **Performance Tracking**: Comprehensive metrics and visualization
 
 ### 🌟 Multi-Stock Capabilities
+
 - **Stock Embeddings**: Learn stock-specific patterns
 - **Unified Training**: Train on multiple stocks simultaneously
 - **Transfer Learning**: Knowledge sharing between similar stocks
@@ -97,7 +101,7 @@ python scripts/demo_enhanced_lstm.py
 The enhanced LSTM typically shows **15-30% better performance** compared to the basic version:
 
 | Metric | Basic LSTM | Enhanced LSTM | Improvement |
-|--------|------------|---------------|-------------|
+| ------ | ---------- | ------------- | ----------- |
 | RMSE   | $8.50      | $6.20         | 27% better  |
 | MAE    | $6.80      | $4.90         | 28% better  |
 | R²     | 0.82       | 0.89          | 8.5% better |
@@ -112,13 +116,14 @@ from src.trainer import LSTMHyperparameterTuner
 
 tuner = LSTMHyperparameterTuner()
 best_params, best_score = tuner.tune(
-    X_train, y_train, 
+    X_train, y_train,
     input_size=feature_count,
     max_trials=20
 )
 ```
 
 **Tunable Parameters:**
+
 - Hidden size: [64, 128, 256]
 - Number of layers: [1, 2, 3]
 - Dropout rate: [0.1, 0.2, 0.3]
@@ -147,6 +152,7 @@ trainer.train(train_dataset, val_dataset)
 ## 📊 Advanced Features
 
 ### Technical Indicators
+
 - **RSI**: Relative Strength Index (14-day)
 - **MACD**: Moving Average Convergence Divergence
 - **Bollinger Bands**: Price volatility bands
@@ -154,11 +160,13 @@ trainer.train(train_dataset, val_dataset)
 - **Moving Averages**: Multiple timeframes (5, 10, 20, 50)
 
 ### Model Components
+
 - **ImprovedLSTMModel**: Single-stock with attention
 - **MultiStockLSTM**: Multi-stock with embeddings
 - **AdvancedStockDataset**: Flexible data preparation
 
 ### Training Features
+
 - **Early Stopping**: Prevents overfitting
 - **Learning Rate Scheduling**: Adaptive learning rates
 - **Gradient Clipping**: Stable gradient flow
@@ -167,23 +175,27 @@ trainer.train(train_dataset, val_dataset)
 ## 🎯 Next Steps for Production
 
 ### 1. Data Pipeline
+
 - [ ] Real-time data ingestion from APIs
 - [ ] Automated feature engineering
 - [ ] Data quality monitoring
 
 ### 2. Model Improvements
+
 - [ ] Ensemble methods (combine multiple models)
 - [ ] Transformer architectures
 - [ ] Sentiment analysis integration
 - [ ] Economic indicators
 
 ### 3. Deployment
+
 - [ ] REST API for predictions
 - [ ] Real-time inference pipeline
 - [ ] Model monitoring and retraining
 - [ ] A/B testing framework
 
 ### 4. Risk Management
+
 - [ ] Confidence intervals for predictions
 - [ ] Uncertainty quantification
 - [ ] Portfolio optimization
@@ -192,6 +204,7 @@ trainer.train(train_dataset, val_dataset)
 ## 🧪 Experimental Features
 
 ### Attention Mechanisms
+
 The enhanced model includes multi-head attention:
 
 ```python
@@ -202,6 +215,7 @@ model = ImprovedLSTMModel(
 ```
 
 ### Stock Embeddings
+
 Learn stock-specific patterns:
 
 ```python

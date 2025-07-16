@@ -1,373 +1,286 @@
 """
-Simple Alpha Vantage Data Collector
-==================================
+Stock Data Collection Pipeline
+=============================
 
-Purpose: Collect stock data using ONLY Alpha Vantage API
-- Clean, focused approach with one data source
-- Collect what we actually need for LSTM training
-- Save data in organized structure
+Collects historical stock data for multiple stocks and merges into single dataset.
+Uses Alpha Vantage API with proper error handling and data validation.
 
-Requirements:
-- Alpha Vantage API key (free tier: 5 calls/minute, 500 calls/day)
-- Get yours at: https://www.alphavantage.co/support/#api-key
+Usage: python data_collection.py
 """
 
-import requests
-import pandas as pd
-import json
+import os
 import time
-import os
-from datetime import datetime
+import pandas as pd
 import logging
+from datetime import datetime
+from alpha_vantage.timeseries import TimeSeries
 from dotenv import load_dotenv
-import os
 
 # Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class AlphaVantageCollector:
+class StockDataCollector:
     """
-    Simple Alpha Vantage data collector focused on what we need for LSTM
-    
-    Why this approach:
-    - Single data source (no merging complexity)
-    - Rate limiting built-in (respects free tier limits)
-    - Gets exactly what we need for our model
+    Collects and merges stock data for multiple tickers
     """
     
-    def __init__(self, api_key):
-        """
-        Initialize collector with your API key
+    def __init__(self, api_key=None):
+        """Initialize with Alpha Vantage API key"""
+        load_dotenv()
+        self.api_key = api_key or os.getenv("ALPHA_VANTAGE_API_KEY")
         
-        Args:
-            api_key: Your Alpha Vantage API key
-        """
-        self.api_key = api_key
-        self.base_url = "https://www.alphavantage.co/query"
+        if not self.api_key:
+            raise ValueError("ALPHA_VANTAGE_API_KEY not found. Set in .env file or pass as parameter.")
         
-        # Create data directory
-        os.makedirs('data/raw', exist_ok=True)
+        self.ts = TimeSeries(key=self.api_key, output_format="pandas")
         
-        logger.info("✅ Alpha Vantage collector initialized")
+        # Create directories
+        os.makedirs("data/raw", exist_ok=True)
+        
+        logger.info("Stock data collector initialized")
     
-    def get_daily_prices(self, symbol, outputsize='full'):
+    def fetch_single_stock(self, symbol, outputsize="full", start_date="2014-01-01"):
         """
-        Get daily adjusted stock prices
+        Fetch data for a single stock with error handling
         
         Args:
-            symbol: Stock symbol (e.g., 'AAPL')
-            outputsize: 'compact' (100 days) or 'full' (20+ years)
-            
-        Why daily adjusted:
-        - Automatically handles stock splits and dividends
-        - Most research uses daily data for LSTM
-        - Good balance between data volume and patterns
-        """
-        params = {
-            'function': 'TIME_SERIES_DAILY',
-            'symbol': symbol,
-            'outputsize': outputsize,
-            'apikey': self.api_key
-        }
+            symbol: Stock ticker (e.g., 'AAPL')
+            outputsize: 'full' or 'compact'
+            start_date: Filter data from this date
         
-        logger.info(f"📊 Fetching daily prices for {symbol}...")
+        Returns:
+            pandas.DataFrame: Stock data with OHLCV columns
+        """
+        logger.info(f"Fetching {symbol} data...")
         
         try:
-            response = requests.get(self.base_url, params=params)
-            data = response.json()
-
-            print("API Response keys:", list(data.keys()))
-            print("API Response:", data)
-
-            # Check for errors
-            if 'Error Message' in data:
-                logger.error(f"❌ Error: {data['Error Message']}")
-                return None
-            
-            if 'Note' in data:
-                logger.warning(f"⚠️  API Limit: {data['Note']}")
-                return None
-            
-            # Extract time series data
-            time_series_key = 'Time Series (Daily)'
-            if time_series_key not in data:
-                logger.error(f"❌ No time series data found for {symbol}")
-                return None
-            
-            # Convert to DataFrame
-            df = pd.DataFrame.from_dict(data[time_series_key], orient='index')
-            df.index = pd.to_datetime(df.index)
-            df = df.sort_index()  # Sort by date ascending
+            # Fetch from Alpha Vantage
+            data, metadata = self.ts.get_daily(symbol=symbol, outputsize=outputsize)
             
             # Rename columns to standard format
-            df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']            
-            # Convert to numeric
-            for col in df.columns:
-                df[col] = pd.to_numeric(df[col])
+            data = data.rename(columns={
+                "1. open": "Open",
+                "2. high": "High", 
+                "3. low": "Low",
+                "4. close": "Close",
+                "5. volume": "Volume"
+            })
             
-            logger.info(f"✅ Got {len(df)} days of price data for {symbol}")
-            logger.info(f"📅 Date range: {df.index.min().date()} to {df.index.max().date()}")
+            # Select only OHLCV columns
+            data = data[["Open", "High", "Low", "Close", "Volume"]]
+            data.index.name = "Date"
             
-            return df
+            # Sort by date (ascending)
+            data = data.sort_index()
+            
+            # Filter by start date
+            data = data[data.index >= start_date]
+            
+            # Data validation
+            if len(data) == 0:
+                raise ValueError(f"No data found for {symbol} after {start_date}")
+            
+            if data.isnull().any().any():
+                logger.warning(f"Found missing values in {symbol} data")
+            
+            logger.info(f"{symbol}: {len(data)} rows fetched ({data.index.min().date()} to {data.index.max().date()})")
+            return data
             
         except Exception as e:
-            logger.error(f"❌ Error fetching data for {symbol}: {str(e)}")
-            return None
+            logger.error(f"Error fetching {symbol}: {str(e)}")
+            raise
     
-    def get_technical_indicator(self, symbol, indicator, **kwargs):
-        """
-        Get a specific technical indicator from Alpha Vantage
+    def save_individual_stock(self, symbol, data):
+        """Save individual stock data to CSV"""
+        filepath = f"data/raw/{symbol}.csv"
+        data.to_csv(filepath)
+        logger.info(f"Saved {symbol} to {filepath}")
+        return filepath
+    
+    def load_stock_from_file(self, symbol):
+        """Load stock data from existing CSV file"""
+        filepath = f"data/raw/{symbol}.csv"
         
-        Args:
-            symbol: Stock symbol
-            indicator: Indicator name (e.g., 'RSI', 'MACD', 'BBANDS')
-            **kwargs: Additional parameters for the indicator
-            
-        Why use Alpha Vantage indicators:
-        - Pre-calculated (saves computation time)
-        - Professional implementation
-        - Consistent with their price data
-        """
-        # Map common indicators to Alpha Vantage function names
-        indicator_map = {
-            'RSI': 'RSI',
-            'MACD': 'MACD', 
-            'BBANDS': 'BBANDS',
-            'SMA': 'SMA',
-            'EMA': 'EMA',
-            'STOCH': 'STOCH',
-            'ADX': 'ADX',
-            'CCI': 'CCI',
-            'AROON': 'AROON',
-            'MFI': 'MFI'
-        }
-        
-        if indicator not in indicator_map:
-            logger.error(f"❌ Indicator {indicator} not supported")
-            return None
-        
-        params = {
-            'function': indicator_map[indicator],
-            'symbol': symbol,
-            'interval': 'daily',
-            'apikey': self.api_key
-        }
-        
-        # Add specific parameters
-        params.update(kwargs)
-        
-        logger.info(f"📈 Fetching {indicator} for {symbol}...")
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"No data file found for {symbol}")
         
         try:
-            response = requests.get(self.base_url, params=params)
-            data = response.json()
-            
-            print("API Response keys:", list(data.keys()))
-
-            # Check for errors
-            if 'Error Message' in data:
-                logger.error(f"❌ Error: {data['Error Message']}")
-                return None
-            
-            # Find the technical analysis key (varies by indicator)
-            tech_key = None
-            for key in data.keys():
-                if 'Technical Analysis' in key:
-                    tech_key = key
-                    break
-            
-            if not tech_key:
-                logger.error(f"❌ No technical analysis data found for {indicator}")
-                return None
-            
-            # Convert to DataFrame
-            df = pd.DataFrame.from_dict(data[tech_key], orient='index')
-            df.index = pd.to_datetime(df.index)
-            df = df.sort_index()
-            
-            # Convert to numeric
-            for col in df.columns:
-                df[col] = pd.to_numeric(df[col])
-            
-            logger.info(f"✅ Got {indicator} data: {len(df)} rows")
-            return df
-            
+            data = pd.read_csv(filepath, parse_dates=["Date"], index_col="Date")
+            data["Ticker"] = symbol
+            logger.info(f"Loaded {symbol}: {len(data)} rows")
+            return data
         except Exception as e:
-            logger.error(f"❌ Error fetching {indicator} for {symbol}: {str(e)}")
-            return None
+            logger.error(f"Error loading {symbol}: {str(e)}")
+            raise
     
-    def collect_complete_dataset(self, symbol, save=True):
+    def collect_all_stocks(self, tickers, start_date="2014-01-01", save_individual=True):
         """
-        Collect complete dataset for one stock
-        
-        What we collect:
-        1. Daily price data (OHLCV)
-        2. Key technical indicators (RSI, MACD, Bollinger Bands)
-        3. Save everything for processing later
+        Collect data for all stocks with API rate limiting
         
         Args:
-            symbol: Stock symbol
-            save: Whether to save data to files
+            tickers: List of stock symbols
+            start_date: Start date for data collection
+            save_individual: Save individual CSV files
+        
+        Returns:
+            dict: {symbol: dataframe} for each stock
         """
-        logger.info(f"\n🚀 Collecting complete dataset for {symbol}")
+        stock_data = {}
         
-        # 1. Get price data
-        price_data = self.get_daily_prices(symbol)
-        if price_data is None:
-            return None
+        logger.info(f"Starting collection for {len(tickers)} stocks")
         
-        # Respect rate limits (free tier: 5 calls/minute)
-        time.sleep(12)  # Wait 12 seconds between calls
-        
-        # 2. Get key technical indicators
-        indicators = {}
-        
-        # RSI (Relative Strength Index)
-        rsi_data = self.get_technical_indicator(symbol, 'RSI', time_period=14)
-        if rsi_data is not None:
-            indicators['RSI'] = rsi_data
-        time.sleep(12)
-        
-        # MACD (Moving Average Convergence Divergence)
-        macd_data = self.get_technical_indicator(symbol, 'MACD', 
-                                               fastperiod=12, slowperiod=26, signalperiod=9)
-        if macd_data is not None:
-            indicators['MACD'] = macd_data
-        time.sleep(12)
-        
-        # Bollinger Bands
-        bb_data = self.get_technical_indicator(symbol, 'BBANDS', time_period=20)
-        if bb_data is not None:
-            indicators['BBANDS'] = bb_data
-        time.sleep(12)
-        
-        # Simple Moving Average
-        sma_data = self.get_technical_indicator(symbol, 'SMA', time_period=20)
-        if sma_data is not None:
-            indicators['SMA'] = sma_data
-        time.sleep(12)
-        
-        logger.info(f"✅ Collected {len(indicators)} technical indicators")
-        
-        # 3. Package everything together
-        dataset = {
-            'symbol': symbol,
-            'price_data': price_data,
-            'indicators': indicators,
-            'collection_date': datetime.now().isoformat(),
-            'data_source': 'alpha_vantage'
-        }
-        
-        # 4. Save if requested
-        if save:
-            self.save_dataset(dataset)
-        
-        return dataset
-    
-    def save_dataset(self, dataset):
-        """Save dataset to organized files"""
-        symbol = dataset['symbol']
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        
-        # Save price data
-        dataset['price_data'].index.name = 'Date'
-        price_file = f"data/raw/{symbol}_prices_{timestamp}.csv"
-        dataset['price_data'].to_csv(price_file)
-        logger.info(f"💾 Saved price data: {price_file}")
-        
-        # Save indicators
-        for indicator_name, indicator_data in dataset['indicators'].items():
-            indicator_file = f"data/raw/{symbol}_{indicator_name}_{timestamp}.csv"
-            indicator_data.to_csv(indicator_file)
-            logger.info(f"💾 Saved {indicator_name}: {indicator_file}")
-        
-        # Save metadata
-        metadata = {
-            'symbol': symbol,
-            'collection_date': dataset['collection_date'],
-            'data_source': dataset['data_source'],
-            'price_data_shape': list(dataset['price_data'].shape),
-            'indicators': list(dataset['indicators'].keys()),
-            'date_range': {
-                'start': str(dataset['price_data'].index.min().date()),
-                'end': str(dataset['price_data'].index.max().date())
-            }
-        }
-        
-        metadata_file = f"data/raw/{symbol}_metadata_{timestamp}.json"
-        with open(metadata_file, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        logger.info(f"💾 Saved metadata: {metadata_file}")
-    
-    def collect_multiple_stocks(self, symbols):
-        """
-        Collect data for multiple stocks
-        
-        Args:
-            symbols: List of stock symbols
-            
-        Note: This will take time due to rate limiting!
-        For 5 stocks: ~5 minutes (5 API calls per stock × 12 seconds each)
-        """
-        logger.info(f"🚀 Collecting data for {len(symbols)} stocks: {symbols}")
-        logger.info("⏳ This will take several minutes due to API rate limits...")
-        
-        results = {}
-        
-        for i, symbol in enumerate(symbols):
-            logger.info(f"\n📊 Processing {symbol} ({i+1}/{len(symbols)})")
-            
+        for i, ticker in enumerate(tickers):
             try:
-                dataset = self.collect_complete_dataset(symbol)
-                if dataset:
-                    results[symbol] = {'status': 'success', 'data': dataset}
-                    logger.info(f"✅ {symbol} completed successfully")
-                else:
-                    results[symbol] = {'status': 'failed'}
-                    logger.error(f"❌ {symbol} failed")
+                # Fetch data
+                data = self.fetch_single_stock(ticker, start_date=start_date)
+                stock_data[ticker] = data
+                
+                # Save individual file
+                if save_individual:
+                    self.save_individual_stock(ticker, data)
+                
+                # Rate limiting (Alpha Vantage: 5 calls/minute for free tier)
+                if i < len(tickers) - 1:  # Don't sleep after last ticker
+                    logger.info("Waiting 15 seconds (API rate limit)...")
+                    time.sleep(15)
                     
             except Exception as e:
-                logger.error(f"❌ Error with {symbol}: {str(e)}")
-                results[symbol] = {'status': 'error', 'message': str(e)}
+                logger.error(f"Failed to collect {ticker}: {str(e)}")
+                # Continue with other stocks
+                continue
         
-        # Summary
-        successful = len([r for r in results.values() if r['status'] == 'success'])
-        logger.info(f"\n🎉 Collection complete!")
-        logger.info(f"✅ Successful: {successful}/{len(symbols)}")
-        logger.info(f"📁 Data saved in: data/raw/")
+        logger.info(f"Collection complete: {len(stock_data)}/{len(tickers)} stocks successful")
+        return stock_data
+    
+    def merge_stocks(self, tickers, use_existing_files=True):
+        """
+        Merge multiple stocks into single DataFrame
         
-        return results
+        Args:
+            tickers: List of stock symbols
+            use_existing_files: Load from existing CSV files vs collect new data
+        
+        Returns:
+            pandas.DataFrame: Merged stock data with Ticker column
+        """
+        logger.info(f"Merging {len(tickers)} stocks...")
+        
+        stock_dfs = []
+        
+        for ticker in tickers:
+            try:
+                if use_existing_files:
+                    df = self.load_stock_from_file(ticker)
+                else:
+                    # Would need to collect first
+                    raise NotImplementedError("Set use_existing_files=True or run collect_all_stocks first")
+                
+                stock_dfs.append(df)
+                
+            except Exception as e:
+                logger.error(f"Failed to load {ticker}: {str(e)}")
+                continue
+        
+        if not stock_dfs:
+            raise ValueError("No stock data loaded successfully")
+        
+        # Merge all dataframes
+        merged_df = pd.concat(stock_dfs, ignore_index=False)
+        merged_df = merged_df.sort_index()  # Sort by date
+        
+        logger.info(f"Initial merged shape: {merged_df.shape}")
+        
+        # Find common trading dates across all stocks
+        date_sets = [set(df.index.date) for df in stock_dfs]
+        common_dates = sorted(set.intersection(*date_sets))
+        
+        if len(common_dates) == 0:
+            logger.warning("No common trading dates found across all stocks")
+            return merged_df
+        
+        # Filter to common dates only
+        merged_df = merged_df.loc[merged_df.index.isin(pd.to_datetime(common_dates))]
+        merged_df = merged_df.sort_index()
+        
+        logger.info(f"Final merged shape: {merged_df.shape} (common dates: {len(common_dates)})")
+        logger.info(f"Date range: {merged_df.index.min().date()} to {merged_df.index.max().date()}")
+        
+        return merged_df
+    
+    def save_merged_data(self, merged_df, filename="multi_stock_merged.csv"):
+        """Save merged dataset"""
+        filepath = f"data/raw/{filename}"
+        
+        # Reset index to make Date a column for easier loading later
+        save_df = merged_df.reset_index()
+        save_df.to_csv(filepath, index=False)
+        
+        logger.info(f"Saved merged data: {filepath}")
+        logger.info(f"Final dataset: {len(save_df)} rows × {len(save_df.columns)} columns")
+        
+        return filepath
+    
+    def run_full_pipeline(self, tickers, start_date="2014-01-01", collect_new=False):
+        """
+        Run complete data collection and merging pipeline
+        
+        Args:
+            tickers: List of stock symbols
+            start_date: Start date for data
+            collect_new: If True, fetch new data; if False, use existing files
+        
+        Returns:
+            str: Path to merged CSV file
+        """
+        logger.info("Starting full data collection pipeline")
+        
+        # Step 1: Collect individual stock data (if needed)
+        if collect_new:
+            self.collect_all_stocks(tickers, start_date=start_date)
+        
+        # Step 2: Merge stocks
+        merged_df = self.merge_stocks(tickers, use_existing_files=True)
+        
+        # Step 3: Save merged dataset
+        filepath = self.save_merged_data(merged_df)
+        
+        logger.info("Pipeline complete!")
+        return filepath
 
 
-# Example usage and testing
-def test_collector():
-    """
-    Test the collector with a small example
+def main():
+    """Run the data collection pipeline"""
     
-    IMPORTANT: You need to set your API key!
-    """
-    load_dotenv()  # This loads the .env file
-
-    # Then get your API key:
-    api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+    # Configuration
+    TICKERS = [
+        "AAPL",   # Apple Inc.
+        "MSFT",   # Microsoft Corporation  
+        "NVDA",   # NVIDIA Corporation
+        "AMZN",   # Amazon.com Inc.
+        "GOOGL",  # Alphabet Inc. (Google)
+    ]
     
-    # Test with one stock first
-    collector = AlphaVantageCollector(api_key)
+    START_DATE = "2014-01-01"
     
-    # Collect data for Apple
-    dataset = collector.collect_complete_dataset('AAPL')
-    
-    if dataset:
-        print(f"\n📊 Sample of collected data:")
-        print(f"Price data shape: {dataset['price_data'].shape}")
-        print(f"Price data columns: {list(dataset['price_data'].columns)}")
-        print(f"Indicators collected: {list(dataset['indicators'].keys())}")
+    try:
+        # Initialize collector
+        collector = StockDataCollector()
         
-        # Show sample price data
-        print(f"\nSample price data (last 5 days):")
-        print(dataset['price_data'][['Open', 'High', 'Low', 'Close', 'Volume']].tail())
+        # Run full pipeline
+        output_file = collector.run_full_pipeline(
+            tickers=TICKERS,
+            start_date=START_DATE,
+            collect_new=False  # Set to True to fetch new data
+        )
+        # Output result
+        print(f"\n✅ Success! Merged data saved to: {output_file}")
+        print(f"📊 Ready for feature engineering and model training")
+        
+    except Exception as e:
+        logger.error(f"Pipeline failed: {str(e)}")
+        raise
 
 
 if __name__ == "__main__":
-    test_collector()
+    main()
