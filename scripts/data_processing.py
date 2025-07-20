@@ -97,10 +97,53 @@ class StockDataProcessor:
             # 14. Close_vs_High20d - Relative strength vs recent highs
             high_20d = ticker_df['High'].rolling(20).max()
             ticker_df['Close_vs_High20d'] = ticker_df['Close'] / high_20d
-            
-            # === VOLATILITY FEATURE (1) ===
+
             # 15. Volatility_20d - Realized volatility
             ticker_df['Volatility_20d'] = ticker_df['Log_Return'].rolling(20).std()
+            
+            # 16. 3-day rolling return (short momentum)
+            ticker_df['Return_3d'] = ticker_df['Close'].pct_change(3)
+
+            # 17. 5-day rolling return (medium momentum)
+            ticker_df['Return_5d'] = ticker_df['Close'].pct_change(5)
+
+            # 18. Rate of Change (ROC, 10d window)
+            ticker_df['ROC_10'] = ta.momentum.roc(ticker_df['Close'], window=10)
+
+            # 19. Price Momentum (close today / close 10 days ago)
+            ticker_df['Momentum_10d'] = ticker_df['Close'] / ticker_df['Close'].shift(10)
+
+            # 20. 5-day rolling volatility
+            ticker_df['Volatility_5d'] = ticker_df['Log_Return'].rolling(5).std()
+
+            # 21. Z-score of 20d volatility (relative to past 20)
+            vol20 = ticker_df['Log_Return'].rolling(20).std()
+            ticker_df['Volatility_Z20'] = (vol20 - vol20.rolling(20).mean()) / vol20.rolling(20).std()
+
+            # 22. High minus Previous Close (gap up/down from prior day)
+            ticker_df['High_PrevClose'] = ticker_df['High'] - ticker_df['Close'].shift(1)
+
+            # 23. Up Days in Last 5 (sum of up closes)
+            ticker_df['Up_5d'] = (ticker_df['Close'] > ticker_df['Close'].shift(1)).rolling(5).sum()
+
+            # 24. On-Balance Volume (OBV)
+            ticker_df['OBV'] = ta.volume.on_balance_volume(ticker_df['Close'], ticker_df['Volume'])
+
+            # 25. Volume Change (1d %)
+            ticker_df['Volume_Change_1d'] = ticker_df['Volume'].pct_change(1)
+
+            # 26. Close Z-score relative to 20d mean and std
+            ticker_df['Close_Z20'] = (ticker_df['Close'] - ticker_df['Close'].rolling(20).mean()) / ticker_df['Close'].rolling(20).std()
+
+            # 27. Drawdown over last 10 days (normalized)
+            rolling_max_10 = ticker_df['Close'].rolling(10, min_periods=1).max()
+            ticker_df['Drawdown_10d'] = (ticker_df['Close'] - rolling_max_10) / rolling_max_10
+
+            # 28. Yesterday's RSI
+            ticker_df['RSI_14_Lag1'] = ticker_df['RSI_14'].shift(1)
+
+            # 29. Yesterday's MACD
+            ticker_df['MACD_Lag1'] = ticker_df['MACD'].shift(1)
             
             processed_dfs.append(ticker_df)
         
@@ -109,18 +152,16 @@ class StockDataProcessor:
         logger.info(f"15 optimal features added. New shape: {df.shape}")
         return df
     
-    def add_targets(self, df, horizon=1):
-        """Add binary classification target"""
-        logger.info("Adding target variables...")
-        
+    def add_targets(self, df, horizon=3):  # Change horizon to 3 or 5 as desired
+        """Add binary classification target for n-day ahead movement"""
+        logger.info(f"Adding target variable: Will price be higher in {horizon} days?")
         for ticker in df['Ticker'].unique():
             ticker_mask = df['Ticker'] == ticker
             ticker_data = df.loc[ticker_mask]
-            
-            # Binary classification: will price go up?
             future_close = ticker_data['Close'].shift(-horizon)
             df.loc[ticker_mask, 'Target'] = (future_close > ticker_data['Close']).astype(int)
-        
+        # Optionally drop rows without a future close
+        df = df.dropna(subset=['Target'])
         return df
     
     def _validate_stock_data(self, df):
@@ -169,16 +210,18 @@ class StockDataProcessor:
         # Validate data quality first
         self._validate_stock_data(df)
         
-        # Define the 15 optimal feature columns
+        # 35 optimal feature columns (original 20 + 15 new)
         self.feature_columns = [
             'Open', 'High', 'Low', 'Close', 'Volume',
             'Log_Return', 'High_Low_Ratio', 'Close_Open_Ratio', 'Gap',
             'RSI_14', 'MACD', 'BB_Position', 'ATR_14', 'ADX',
             'Volume_Ratio_20', 'Volume_Price_Correlation',
             'Close_vs_SMA20', 'Close_vs_SMA50', 'Close_vs_High20d',
-            'Volatility_20d'
+            'Volatility_20d', 'Return_3d', 'Return_5d', 'ROC_10', 'Momentum_10d',
+            'Volatility_5d', 'Volatility_Z20', 'High_PrevClose', 'Up_5d', 'OBV',
+            'Volume_Change_1d', 'Close_Z20', 'Drawdown_10d', 'RSI_14_Lag1', 'MACD_Lag1'
         ]
-        
+                
         # Handle infinite values
         df = df.replace([np.inf, -np.inf], np.nan)
         
