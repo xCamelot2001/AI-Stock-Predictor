@@ -2,8 +2,7 @@
 Optimized Stock Data Processing Pipeline
 =======================================
 
-Processes raw stock data with optimal features for LSTM training.
-This version cleans the data but DOES NOT scale it.
+Processes raw stock data with research-validated features for LSTM training.
 """
 
 import os
@@ -11,7 +10,6 @@ import pandas as pd
 import numpy as np
 import logging
 import ta
-# StandardScaler is no longer needed in this script
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -27,7 +25,6 @@ class StockDataProcessor:
         logger.info("Optimized data processor initialized")
     
     def load_data(self, filepath="data/raw/multi_stock_merged.csv"):
-        # This method remains unchanged
         logger.info(f"Loading data from {filepath}")
         df = pd.read_csv(filepath)
         df['Date'] = pd.to_datetime(df['Date'])
@@ -37,69 +34,79 @@ class StockDataProcessor:
         return df
     
     def add_optimal_features(self, df):
-        """Add optimal features for stock prediction"""
+        """Add research-validated features for stock prediction"""
         logger.info("Adding optimal features...")
         
         processed_dfs = []
         for ticker in df['Ticker'].unique():
             ticker_df = df[df['Ticker'] == ticker].copy()
             
-            # --- All feature creation logic remains the same ---
-            # === CORE PRICE ACTION FEATURES (4) ===
+            # 1. CORE RETURN FEATURES
             ticker_df['Log_Return'] = np.log(ticker_df['Close'] / ticker_df['Close'].shift(1))
+            ticker_df['Intraday_Range'] = (ticker_df['High'] - ticker_df['Low']) / ticker_df['Close']
+            ticker_df['Overnight_Return'] = (ticker_df['Open'] - ticker_df['Close'].shift(1)) / ticker_df['Close'].shift(1)
             ticker_df['High_Low_Ratio'] = ticker_df['High'] / ticker_df['Low']
             ticker_df['Close_Open_Ratio'] = ticker_df['Close'] / ticker_df['Open']
-            ticker_df['Gap'] = (ticker_df['Open'] - ticker_df['Close'].shift(1)) / ticker_df['Close'].shift(1)
-            # ... (rest of your feature engineering)...
-            ticker_df['RSI_14'] = ta.momentum.rsi(ticker_df['Close'], window=14)
-            ticker_df['MACD'] = ta.trend.macd_diff(ticker_df['Close'])
-            bb_high = ta.volatility.bollinger_hband(ticker_df['Close'])
-            bb_low = ta.volatility.bollinger_lband(ticker_df['Close'])
-            ticker_df['BB_Position'] = (ticker_df['Close'] - bb_low) / (bb_high - bb_low)
-            ticker_df['ATR_14'] = ta.volatility.average_true_range(ticker_df['High'], ticker_df['Low'], ticker_df['Close'], window=14)
-            ticker_df['ADX'] = ta.trend.adx(ticker_df['High'], ticker_df['Low'], ticker_df['Close'])
-            volume_ma_20 = ticker_df['Volume'].rolling(20).mean()
-            ticker_df['Volume_Ratio_20'] = ticker_df['Volume'] / volume_ma_20
-            ticker_df['Volume_Price_Correlation'] = ticker_df['Close'].rolling(20).corr(ticker_df['Volume'])
-            sma_20 = ta.trend.sma_indicator(ticker_df['Close'], window=20)
-            ticker_df['Close_vs_SMA20'] = ticker_df['Close'] / sma_20
-            sma_50 = ta.trend.sma_indicator(ticker_df['Close'], window=50)
-            ticker_df['Close_vs_SMA50'] = ticker_df['Close'] / sma_50
-            high_20d = ticker_df['High'].rolling(20).max()
-            ticker_df['Close_vs_High20d'] = ticker_df['Close'] / high_20d
-            ticker_df['Volatility_20d'] = ticker_df['Log_Return'].rolling(20).std()
-            ticker_df['Return_3d'] = ticker_df['Close'].pct_change(3)
-            ticker_df['Return_5d'] = ticker_df['Close'].pct_change(5)
-            ticker_df['ROC_10'] = ta.momentum.roc(ticker_df['Close'], window=10)
-            ticker_df['Momentum_10d'] = ticker_df['Close'] / ticker_df['Close'].shift(10)
-            ticker_df['Volatility_5d'] = ticker_df['Log_Return'].rolling(5).std()
-            vol20 = ticker_df['Log_Return'].rolling(20).std()
-            ticker_df['Volatility_Z20'] = (vol20 - vol20.rolling(20).mean()) / vol20.rolling(20).std()
-            ticker_df['High_PrevClose'] = ticker_df['High'] - ticker_df['Close'].shift(1)
-            ticker_df['Up_5d'] = (ticker_df['Close'] > ticker_df['Close'].shift(1)).rolling(5).sum()
-            ticker_df['OBV'] = ta.volume.on_balance_volume(ticker_df['Close'], ticker_df['Volume'])
-            ticker_df['Volume_Change_1d'] = ticker_df['Volume'].pct_change(1)
-            ticker_df['Close_Z20'] = (ticker_df['Close'] - ticker_df['Close'].rolling(20).mean()) / ticker_df['Close'].rolling(20).std()
-            rolling_max_10 = ticker_df['Close'].rolling(10, min_periods=1).max()
-            ticker_df['Drawdown_10d'] = (ticker_df['Close'] - rolling_max_10) / rolling_max_10
-            ticker_df['RSI_14_Lag1'] = ticker_df['RSI_14'].shift(1)
-            ticker_df['MACD_Lag1'] = ticker_df['MACD'].shift(1)
+            
+            # 2. MICROSTRUCTURE FEATURES
+            ticker_df['Bid_Ask_Proxy'] = 2 * np.sqrt(np.abs(ticker_df['Log_Return']))
+            ticker_df['Amihud_Illiquidity'] = np.abs(ticker_df['Log_Return']) / ticker_df['Volume']
+            ticker_df['Kyle_Lambda'] = ticker_df['Log_Return'].abs() / np.sqrt(ticker_df['Volume'])
+            
+            # 3. VOLUME FEATURES
+            ticker_df['VWAP'] = (ticker_df['Close'] * ticker_df['Volume']).rolling(20).sum() / ticker_df['Volume'].rolling(20).sum()
+            ticker_df['Price_to_VWAP'] = ticker_df['Close'] / ticker_df['VWAP']
+            ticker_df['Volume_Imbalance'] = ticker_df['Volume'].diff() / ticker_df['Volume'].rolling(20).mean()
+            ticker_df['Volume_Ratio_20'] = ticker_df['Volume'] / ticker_df['Volume'].rolling(20).mean()
+            
+            # 4. MOMENTUM FEATURES
+            for period in [5, 10, 20]:
+                ticker_df[f'Return_{period}d'] = ticker_df['Close'].pct_change(period)
+                ret_mean = ticker_df[f'Return_{period}d'].rolling(period).mean()
+                ret_std = ticker_df[f'Return_{period}d'].rolling(period).std()
+                ticker_df[f'Sharpe_{period}d'] = ret_mean / (ret_std + 1e-6)
+            
+            # 5. VOLATILITY FEATURES
+            ticker_df['Realized_Vol_5d'] = ticker_df['Log_Return'].rolling(5).std() * np.sqrt(252)
+            ticker_df['Realized_Vol_20d'] = ticker_df['Log_Return'].rolling(20).std() * np.sqrt(252)
+            ticker_df['Vol_of_Vol'] = ticker_df['Realized_Vol_5d'].rolling(20).std()
+            ticker_df['Skewness_20d'] = ticker_df['Log_Return'].rolling(20).skew()
+            
+            # 6. TECHNICAL INDICATORS
+            rsi = ta.momentum.rsi(ticker_df['Close'], window=14)
+            ticker_df['RSI_14'] = rsi / 100  # Normalize to 0-1
+            ticker_df['RSI_Oversold'] = (rsi < 30).astype(int)
+            ticker_df['RSI_Overbought'] = (rsi > 70).astype(int)
+            
+            # Moving average features
+            ma20 = ticker_df['Close'].rolling(20).mean()
+            ma50 = ticker_df['Close'].rolling(50).mean()
+            ticker_df['Price_to_MA20'] = ticker_df['Close'] / ma20
+            ticker_df['Price_to_MA50'] = ticker_df['Close'] / ma50
+            ticker_df['MA20_Slope'] = ma20.pct_change(5)
+            
+            # 7. TIME FEATURES (for market anomalies)
+            ticker_df['Day_of_Week'] = ticker_df.index.dayofweek
+            ticker_df['Is_Month_End'] = (ticker_df.index.day > 25).astype(int)
             
             processed_dfs.append(ticker_df)
         
         df = pd.concat(processed_dfs, ignore_index=False)
         df = df.sort_values(['Date', 'Ticker'])
-        logger.info(f"Optimal features added. New shape: {df.shape}")
+        logger.info(f"Features added. New shape: {df.shape}")
         return df
     
-    def add_targets(self, df, horizon=5): # tweak horizon as needed
-        # """Add target variable: Will price be higher in N days?"""
-        logger.info(f"Adding target variable: Will price be higher in {horizon} days?")
+    def add_targets(self, df, horizon=20, threshold=0.02):
+        """Add target: significant price move in N days"""
+        logger.info(f"Adding target: >{threshold*100}% move in {horizon} days")
+        
         for ticker in df['Ticker'].unique():
             ticker_mask = df['Ticker'] == ticker
             ticker_data = df.loc[ticker_mask]
-            future_close = ticker_data['Close'].shift(-horizon)
-            df.loc[ticker_mask, 'Target'] = (future_close > ticker_data['Close']).astype(int)
+            
+            future_return = (ticker_data['Close'].shift(-horizon) - ticker_data['Close']) / ticker_data['Close']
+            df.loc[ticker_mask, 'Target'] = (future_return > threshold).astype(int)
+            
         df = df.dropna(subset=['Target'])
         return df
     
@@ -107,19 +114,11 @@ class StockDataProcessor:
         """Validate stock data quality"""
         issues = []
         
-        # Check for negative prices
         price_cols = ['Open', 'High', 'Low', 'Close']
         for col in price_cols:
             if (df[col] <= 0).any():
                 issues.append(f"Found non-positive values in {col}")
         
-        # Check OHLC logic
-        if ((df['High'] < df['Low']) | (df['High'] < df['Open']) | 
-            (df['High'] < df['Close']) | (df['Low'] > df['Open']) | 
-            (df['Low'] > df['Close'])).any():
-            issues.append("OHLC logic violations found")
-        
-        # Check for negative volume
         if (df['Volume'] < 0).any():
             issues.append("Found negative volume values")
         
@@ -130,53 +129,73 @@ class StockDataProcessor:
         else:
             logger.info("Data quality validation passed")
     
-    def _check_data_sufficiency(self, df):
-        """Check if we have sufficient data per stock"""
-        logger.info("Data sufficiency check:")
-        min_samples = 1000
-        
-        for ticker in df['Ticker'].unique():
-            count = len(df[df['Ticker'] == ticker])
-            if count < min_samples:
-                logger.warning(f"{ticker}: Only {count:,} samples (< {min_samples:,})")
-            else:
-                logger.info(f"{ticker}: {count:,} samples")
-
     def clean_data(self, df):
-        """Cleans data and prepares features, but does NOT scale them."""
-        # --- UPDATED LOG MESSAGE ---
+        """Clean data and select final features"""
         logger.info("Cleaning data...")
         
         self._validate_stock_data(df)
         
+        # Define features to use (NO raw OHLCV)
         self.feature_columns = [
-            'Open', 'High', 'Low', 'Close', 'Volume',
-            'Log_Return', 'High_Low_Ratio', 'Close_Open_Ratio', 'Gap', 'RSI_14', 'MACD',
-            'BB_Position', 'ATR_14', 'ADX', 'Volume_Ratio_20', 'Volume_Price_Correlation',
-            'Close_vs_SMA20', 'Close_vs_SMA50', 'Close_vs_High20d', 'Volatility_20d',
-            'Return_3d', 'Return_5d', 'ROC_10', 'Momentum_10d', 'Volatility_5d',
-            'Volatility_Z20', 'High_PrevClose', 'Up_5d', 'OBV', 'Volume_Change_1d',
-            'Close_Z20', 'Drawdown_10d', 'RSI_14_Lag1', 'MACD_Lag1'
+            # Core returns
+            'Log_Return', 'Intraday_Range', 'Overnight_Return',
+            'High_Low_Ratio', 'Close_Open_Ratio',
+            
+            # Microstructure
+            'Bid_Ask_Proxy', 'Amihud_Illiquidity', 'Kyle_Lambda',
+            
+            # Volume
+            'Price_to_VWAP', 'Volume_Imbalance', 'Volume_Ratio_20',
+            
+            # Momentum
+            'Return_5d', 'Return_10d', 'Return_20d',
+            'Sharpe_5d', 'Sharpe_10d', 'Sharpe_20d',
+            
+            # Volatility
+            'Realized_Vol_5d', 'Realized_Vol_20d', 'Vol_of_Vol', 'Skewness_20d',
+            
+            # Technical
+            'RSI_14', 'RSI_Oversold', 'RSI_Overbought',
+            'Price_to_MA20', 'Price_to_MA50', 'MA20_Slope',
+            
+            # Time
+            'Day_of_Week', 'Is_Month_End'
         ]
-                
+        
+        # Remove stocks with insufficient data
+        min_price = 5.0
+        min_volume = 100000
+        
+        valid_stocks = []
+        for ticker in df['Ticker'].unique():
+            ticker_data = df[df['Ticker'] == ticker]
+            avg_price = ticker_data['Close'].mean()
+            avg_volume = ticker_data['Volume'].mean()
+            
+            if avg_price >= min_price and avg_volume >= min_volume and len(ticker_data) >= 1000:
+                valid_stocks.append(ticker)
+            else:
+                logger.info(f"Removing {ticker}: price=${avg_price:.2f}, volume={avg_volume:,.0f}")
+        
+        df = df[df['Ticker'].isin(valid_stocks)]
+        
+        # Handle infinities and missing values
         df = df.replace([np.inf, -np.inf], np.nan)
         
-        missing_pct = df.isnull().sum() / len(df)
-        high_missing_cols = missing_pct[missing_pct > 0.5].index.tolist()
-        if high_missing_cols:
-            logger.warning(f"Removing columns with >50% missing: {high_missing_cols}")
-            df = df.drop(columns=high_missing_cols)
-        
+        # Forward fill by ticker
         for ticker in df['Ticker'].unique():
             ticker_mask = df['Ticker'] == ticker
             df.loc[ticker_mask] = df.loc[ticker_mask].fillna(method='ffill')
         
+        # Drop remaining NaNs
         df = df.dropna()
         
-        self._check_data_sufficiency(df)
+        # Keep only feature columns + metadata
+        keep_cols = self.feature_columns + ['Ticker', 'Target']
+        df = df[keep_cols]
         
-        logger.info(f"Final cleaned (unscaled) dataset: {df.shape[0]} rows, {len(self.feature_columns)} features")
-        logger.info(f"Class balance: {df['Target'].value_counts().to_dict()}")
+        logger.info(f"Final dataset: {df.shape[0]} rows, {len(self.feature_columns)} features")
+        logger.info(f"Class balance: {df['Target'].value_counts(normalize=True).to_dict()}")
         
         return df
     
@@ -190,7 +209,7 @@ class StockDataProcessor:
         metadata = {
             'feature_columns': self.feature_columns,
             'num_features': len(self.feature_columns),
-            'dataset_shape': df.shape,
+            'dataset_shape': list(df.shape),
             'class_distribution': df['Target'].value_counts().to_dict(),
             'stocks': sorted(df['Ticker'].unique().tolist()),
             'date_range': {
@@ -198,6 +217,7 @@ class StockDataProcessor:
                 'end': str(df.index.max().date())
             }
         }
+        
         with open("data/processed/metadata_optimized.json", 'w') as f:
             json.dump(metadata, f, indent=2)
         
@@ -211,13 +231,13 @@ class StockDataProcessor:
         # Load and process
         df = self.load_data(input_file)
         df = self.add_optimal_features(df)
-        df = self.add_targets(df)
+        df = self.add_targets(df, horizon=20, threshold=0.02)  # 20-day, 2% moves
         df = self.clean_data(df)
-
+        
         # Save processed data
         output_path = self.save_data(df)
         
-        logger.info("Optimized processing complete!")
+        logger.info("Processing complete!")
         return output_path
 
 
@@ -228,14 +248,8 @@ def main():
         output_path = processor.run_pipeline()
         
         print(f"\nData processing complete!")
-        print(f"Processed data: {output_path}")
-        print(f"Features: {len(processor.feature_columns)} (reduced from 98+)")
-        print(f"Ready for LSTM training!")
-        
-        # Print feature list
-        print(f"\nSelected features:")
-        for i, feature in enumerate(processor.feature_columns, 1):
-            print(f"  {i:2d}. {feature}")
+        print(f"Output: {output_path}")
+        print(f"Features: {len(processor.feature_columns)}")
         
     except Exception as e:
         logger.error(f"Pipeline failed: {str(e)}")
