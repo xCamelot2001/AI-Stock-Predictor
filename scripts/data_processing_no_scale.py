@@ -231,7 +231,7 @@ class StockDataProcessor:
         # Load and process
         df = self.load_data(input_file)
         df = self.add_optimal_features(df)
-        df = self.add_targets(df, horizon=20, threshold=0.02)  # 20-day, 2% moves
+        df = self.add_targets(df, horizon=5, threshold=0.02)  # 20-day, 2% moves
         df = self.clean_data(df)
         
         # Save processed data
