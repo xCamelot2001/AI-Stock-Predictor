@@ -52,27 +52,32 @@ class DataIntegrator:
         
         return latest_file
     
-    def load_stock_data(self, symbol='AAPL'):
+    def load_stock_data(self):
         """Load processed stock data with technical indicators"""
         
-        pattern = f"data/processed/{symbol}_processed_*.csv"
-        latest_file = self.load_latest_file(pattern, "stock data")
+        stock_file = "data/processed/stock_data_research_optimized.csv"
         
-        if not latest_file:
+        if not os.path.exists(stock_file):
+            logger.error(f"❌ Stock data file not found: {stock_file}")
             return None
         
+        logger.info(f"📊 Loading stock data: {stock_file}")
+        
         # Load stock data
-        df_stock = pd.read_csv(latest_file, index_col='Date', parse_dates=True)
+        df_stock = pd.read_csv(stock_file)
+        df_stock['Date'] = pd.to_datetime(df_stock['Date'])
+        df_stock.set_index('Date', inplace=True)
         
         logger.info(f"✅ Loaded stock data: {len(df_stock)} rows, {len(df_stock.columns)} columns")
         logger.info(f"📅 Stock date range: {df_stock.index.min().date()} to {df_stock.index.max().date()}")
+        logger.info(f"📊 Tickers: {sorted(df_stock['Ticker'].unique())}")
         
         return df_stock
     
-    def load_sentiment_data(self, symbol='AAPL'):
-        """Load daily sentiment data"""
+    def load_sentiment_data(self):
+        """Load daily sentiment data for all stocks"""
         
-        pattern = f"data/sentiment/{symbol}_daily_sentiment_*.csv"
+        pattern = "data/sentiment/ALL_STOCKS_daily_sentiment_*.csv"
         latest_file = self.load_latest_file(pattern, "sentiment data")
         
         if not latest_file:
@@ -81,39 +86,49 @@ class DataIntegrator:
         # Load sentiment data
         df_sentiment = pd.read_csv(latest_file)
         
-        # Convert date column to datetime index
+        # Convert date column to datetime index and rename symbol to Ticker
         df_sentiment['date'] = pd.to_datetime(df_sentiment['date'])
+        df_sentiment = df_sentiment.rename(columns={'symbol': 'Ticker'})
         df_sentiment.set_index('date', inplace=True)
         
         logger.info(f"✅ Loaded sentiment data: {len(df_sentiment)} rows, {len(df_sentiment.columns)} columns")
         logger.info(f"📅 Sentiment date range: {df_sentiment.index.min().date()} to {df_sentiment.index.max().date()}")
+        logger.info(f"📊 Sentiment tickers: {sorted(df_sentiment['Ticker'].unique())}")
         
         return df_sentiment
     
     def align_data_by_date(self, df_stock, df_sentiment):
         """
-        Align stock and sentiment data by date
+        Align stock and sentiment data by date and ticker
         
         Strategy:
-        - Only keep stock data where we have real sentiment data
-        - This ensures scientific validity of the sentiment features
+        - Merge on both date and ticker for proper alignment
+        - Only keep data where we have both stock AND sentiment data
         """
-        logger.info("🔗 Aligning stock and sentiment data by date...")
+        logger.info("🔗 Aligning stock and sentiment data by date and ticker...")
+        
+        # Reset index to have Date as column for merging
+        df_stock_reset = df_stock.reset_index()
+        df_sentiment_reset = df_sentiment.reset_index()
+        df_sentiment_reset = df_sentiment_reset.rename(columns={'date': 'Date'})
         
         # Get date ranges
-        stock_start, stock_end = df_stock.index.min(), df_stock.index.max()
-        sentiment_start, sentiment_end = df_sentiment.index.min(), df_sentiment.index.max()
+        stock_start, stock_end = df_stock_reset['Date'].min(), df_stock_reset['Date'].max()
+        sentiment_start, sentiment_end = df_sentiment_reset['Date'].min(), df_sentiment_reset['Date'].max()
         
         logger.info(f"📊 Date range comparison:")
         logger.info(f"   Stock: {stock_start.date()} to {stock_end.date()}")
         logger.info(f"   Sentiment: {sentiment_start.date()} to {sentiment_end.date()}")
         
-        # INNER JOIN - only keep dates where we have both stock AND sentiment data
-        df_merged = df_stock.join(df_sentiment, how='inner')
+        # INNER JOIN - merge on both Date and Ticker
+        df_merged = pd.merge(df_stock_reset, df_sentiment_reset, on=['Date', 'Ticker'], how='inner')
         
-        sentiment_cols = [col for col in df_sentiment.columns]
+        # Set Date back as index
+        df_merged.set_index('Date', inplace=True)
         
-        logger.info(f"📊 Merge results (inner join):")
+        sentiment_cols = [col for col in df_sentiment.columns if col != 'Ticker']
+        
+        logger.info(f"📊 Merge results (inner join on Date + Ticker):")
         logger.info(f"   Original stock data rows: {len(df_stock)}")
         logger.info(f"   Sentiment data rows: {len(df_sentiment)}")
         logger.info(f"   Final merged rows: {len(df_merged)}")
@@ -288,32 +303,31 @@ class DataIntegrator:
         
         return filename, metadata_file
     
-    def integrate_data(self, symbol='AAPL', save=True):
+    def integrate_data(self, save=True):
         """
         Complete data integration pipeline - REAL SENTIMENT DATA ONLY
         
         Args:
-            symbol: Stock symbol
             save: Whether to save results
             
         Strategy: Only use stock data where we have real sentiment data
         """
-        logger.info(f"\n🚀 Starting data integration for {symbol}")
+        logger.info(f"\n🚀 Starting data integration for all stocks")
         logger.info("📊 Strategy: Using ONLY dates with real sentiment data")
         
         # 1. Load stock data
-        df_stock = self.load_stock_data(symbol)
+        df_stock = self.load_stock_data()
         if df_stock is None:
             logger.error("❌ Failed to load stock data")
             return None
         
         # 2. Load sentiment data
-        df_sentiment = self.load_sentiment_data(symbol)
+        df_sentiment = self.load_sentiment_data()
         if df_sentiment is None:
             logger.error("❌ Failed to load sentiment data")
             return None
         
-        # 3. Align data by date (INNER JOIN - only real sentiment dates)
+        # 3. Align data by date and ticker (INNER JOIN - only real sentiment dates)
         df_merged, sentiment_cols = self.align_data_by_date(df_stock, df_sentiment)
         
         # 4. Check for any missing sentiment data
@@ -330,7 +344,7 @@ class DataIntegrator:
         
         # 8. Save results
         if save:
-            filename, metadata_file = self.save_integrated_data(df_merged, symbol, analysis_stats)
+            filename, metadata_file = self.save_integrated_data(df_merged, "ALL_STOCKS", analysis_stats)
         
         logger.info(f"\n✅ Data integration completed!")
         logger.info(f"📊 Scientific validity: All sentiment data is REAL (no forward-filling)")
@@ -345,36 +359,35 @@ def main():
     # Create integrator
     integrator = DataIntegrator()
     
-    # Integrate data for AAPL
-    symbol = 'AAPL'
-    
     try:
-        df_integrated = integrator.integrate_data(symbol)
+        df_integrated = integrator.integrate_data()
         
         if df_integrated is not None:
             print(f"\n✅ Integration successful!")
             print(f"📊 Final dataset: {len(df_integrated)} rows × {len(df_integrated.columns)} columns")
             print(f"📅 Date range: {df_integrated.index.min().date()} to {df_integrated.index.max().date()}")
             print(f"📁 Data saved in: data/integrated/")
+            print(f"📊 Tickers: {', '.join(sorted(df_integrated['Ticker'].unique()))}")
             
             # Show feature breakdown
-            price_features = [col for col in df_integrated.columns if col not in ['Target'] and 'sentiment' not in col.lower() and 'compound' not in col.lower() and 'positive' not in col.lower() and 'negative' not in col.lower() and 'neutral' not in col.lower() and 'article' not in col.lower() and 'news' not in col.lower()]
+            price_features = [col for col in df_integrated.columns if col not in ['Target', 'Ticker'] and 'sentiment' not in col.lower() and 'compound' not in col.lower() and 'positive' not in col.lower() and 'negative' not in col.lower() and 'neutral' not in col.lower() and 'article' not in col.lower() and 'news' not in col.lower()]
             sentiment_features = [col for col in df_integrated.columns if any(word in col.lower() for word in ['sentiment', 'compound', 'positive', 'negative', 'neutral', 'article', 'news'])]
             
             print(f"\n📊 Feature breakdown:")
             print(f"   Price/Technical features: {len(price_features)}")
             print(f"   Sentiment features: {len(sentiment_features)}")
             print(f"   Target: 1")
+            print(f"   Ticker: 1")
             print(f"   Total: {len(df_integrated.columns)}")
             
-            # Show the actual data since it's small
-            print(f"\n📋 Complete dataset (all {len(df_integrated)} rows):")
-            key_cols = ['Close', 'compound_score_mean', 'positive_ratio', 'negative_ratio', 'article_count', 'Target']
+            # Show sample data
+            print(f"\n📋 Sample of integrated dataset:")
+            key_cols = ['Ticker', 'compound_score_mean', 'positive_ratio', 'negative_ratio', 'article_count', 'Target']
             available_cols = [col for col in key_cols if col in df_integrated.columns]
-            print(df_integrated[available_cols])
+            print(df_integrated[available_cols].head(10))
             
-            print(f"\n🚀 Ready for proof-of-concept LSTM training!")
-            print(f"📊 Note: Small dataset is perfect for testing sentiment integration concept")
+            print(f"\n🚀 Ready for LSTM+FinBERT training!")
+            print(f"📊 Dataset combines technical indicators with sentiment analysis")
         else:
             print("❌ Integration failed")
             

@@ -324,6 +324,76 @@ class FinBERTSentimentAnalyzer:
         
         return df_with_sentiment, daily_sentiment
     
+    def analyze_all_stocks_sentiment(self, symbols=['AAPL', 'AMZN', 'GOOGL', 'MSFT', 'NVDA'], save=True):
+        """
+        Analyze sentiment for all stocks
+        
+        Args:
+            symbols: List of stock symbols to analyze
+            save: Whether to save individual results for each stock
+        
+        Returns:
+            Dictionary with results for each symbol
+        """
+        logger.info(f"\n🚀 Starting sentiment analysis for all stocks: {symbols}")
+        
+        all_results = {}
+        all_articles = []
+        all_daily = []
+        
+        for symbol in symbols:
+            logger.info(f"\n📊 Processing {symbol}...")
+            
+            try:
+                df_articles, df_daily = self.analyze_news_sentiment(symbol, save=False)
+                
+                if df_articles is not None and df_daily is not None:
+                    # Add symbol column
+                    df_articles['symbol'] = symbol
+                    df_daily['symbol'] = symbol
+                    
+                    # Store individual results
+                    all_results[symbol] = {
+                        'articles': df_articles,
+                        'daily': df_daily
+                    }
+                    
+                    # Collect for combined dataset
+                    all_articles.append(df_articles)
+                    all_daily.append(df_daily)
+                    
+                    logger.info(f"✅ {symbol}: {len(df_articles)} articles, {len(df_daily)} days")
+                    
+                    # Save individual results if requested
+                    if save:
+                        self.save_sentiment_data(df_articles, df_daily, symbol)
+                        
+                else:
+                    logger.warning(f"⚠️  No data found for {symbol}")
+                    all_results[symbol] = None
+                    
+            except Exception as e:
+                logger.error(f"❌ Error processing {symbol}: {str(e)}")
+                all_results[symbol] = None
+        
+        # Combine all results
+        if all_articles:
+            combined_articles = pd.concat(all_articles, ignore_index=True)
+            combined_daily = pd.concat(all_daily, ignore_index=True)
+            
+            # Save combined results
+            if save:
+                self.save_combined_sentiment_data(combined_articles, combined_daily)
+            
+            all_results['combined'] = {
+                'articles': combined_articles,
+                'daily': combined_daily
+            }
+            
+            logger.info(f"\n✅ Combined results: {len(combined_articles)} total articles, {len(combined_daily)} total daily records")
+        
+        return all_results
+    
     def save_sentiment_data(self, df_articles, df_daily, symbol):
         """Save sentiment analysis results"""
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -359,6 +429,45 @@ class FinBERTSentimentAnalyzer:
         logger.info(f"💾 Saved metadata: {metadata_file}")
         
         return articles_file, daily_file, metadata_file
+    
+    def save_combined_sentiment_data(self, combined_articles, combined_daily):
+        """Save combined sentiment analysis results for all stocks"""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Save combined article-level sentiment
+        articles_file = f"data/sentiment/ALL_STOCKS_articles_sentiment_{timestamp}.csv"
+        combined_articles.to_csv(articles_file, index=False)
+        logger.info(f"💾 Saved combined article sentiment: {articles_file}")
+        
+        # Save combined daily aggregated sentiment
+        daily_file = f"data/sentiment/ALL_STOCKS_daily_sentiment_{timestamp}.csv"
+        combined_daily.to_csv(daily_file, index=False)
+        logger.info(f"💾 Saved combined daily sentiment: {daily_file}")
+        
+        # Save combined metadata
+        symbols = combined_articles['symbol'].unique().tolist()
+        metadata = {
+            'symbols': symbols,
+            'analysis_date': datetime.now().isoformat(),
+            'model_used': self.model_name,
+            'total_articles': len(combined_articles),
+            'total_daily_records': len(combined_daily),
+            'unique_dates': len(combined_daily['date'].unique()),
+            'articles_per_symbol': combined_articles['symbol'].value_counts().to_dict(),
+            'overall_sentiment_distribution': combined_articles['sentiment_label'].value_counts().to_dict(),
+            'avg_compound_score': float(combined_articles['compound_score'].mean()),
+            'files': {
+                'articles': articles_file,
+                'daily': daily_file
+            }
+        }
+        
+        metadata_file = f"data/sentiment/ALL_STOCKS_sentiment_metadata_{timestamp}.json"
+        with open(metadata_file, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        logger.info(f"💾 Saved combined metadata: {metadata_file}")
+        
+        return articles_file, daily_file, metadata_file
 
 
 def main():
@@ -369,32 +478,59 @@ def main():
     # Initialize analyzer
     analyzer = FinBERTSentimentAnalyzer()
     
-    # Analyze sentiment for AAPL
-    symbol = 'AAPL'
+    # Analyze sentiment for all stocks
+    symbols = ['AAPL', 'AMZN', 'GOOGL', 'MSFT', 'NVDA']
     
     try:
-        df_articles, df_daily = analyzer.analyze_news_sentiment(symbol)
+        print(f"\n🚀 Starting sentiment analysis for all stocks: {symbols}")
+        all_results = analyzer.analyze_all_stocks_sentiment(symbols)
         
-        if df_articles is not None:
-            print(f"\n✅ Sentiment analysis completed!")
-            print(f"📊 Analyzed {len(df_articles)} articles")
-            print(f"📅 Covering {len(df_daily)} unique dates")
+        if 'combined' in all_results and all_results['combined'] is not None:
+            combined_articles = all_results['combined']['articles']
+            combined_daily = all_results['combined']['daily']
+            
+            print(f"\n✅ Sentiment analysis completed for all stocks!")
+            print(f"📊 Total articles analyzed: {len(combined_articles)}")
+            print(f"📅 Total daily records: {len(combined_daily)}")
             print(f"📁 Results saved in: data/sentiment/")
             
-            # Show sentiment distribution
-            print(f"\n📊 Sentiment Distribution:")
-            sentiment_counts = df_articles['sentiment_label'].value_counts()
+            # Show results per stock
+            print(f"\n📊 Results per stock:")
+            for symbol in symbols:
+                if symbol in all_results and all_results[symbol] is not None:
+                    stock_articles = all_results[symbol]['articles']
+                    stock_daily = all_results[symbol]['daily']
+                    print(f"   {symbol}: {len(stock_articles)} articles, {len(stock_daily)} days")
+                else:
+                    print(f"   {symbol}: No data available")
+            
+            # Show overall sentiment distribution
+            print(f"\n📊 Overall Sentiment Distribution:")
+            sentiment_counts = combined_articles['sentiment_label'].value_counts()
             for label, count in sentiment_counts.items():
-                print(f"   {label.capitalize()}: {count} ({count/len(df_articles)*100:.1f}%)")
+                print(f"   {label.capitalize()}: {count} ({count/len(combined_articles)*100:.1f}%)")
+            
+            # Show sentiment by stock
+            print(f"\n📊 Sentiment by Stock:")
+            sentiment_by_stock = combined_articles.groupby(['symbol', 'sentiment_label']).size().unstack(fill_value=0)
+            for symbol in symbols:
+                if symbol in sentiment_by_stock.index:
+                    total = sentiment_by_stock.loc[symbol].sum()
+                    print(f"   {symbol}: {total} articles")
+                    for sentiment in sentiment_by_stock.columns:
+                        count = sentiment_by_stock.loc[symbol, sentiment]
+                        if count > 0:
+                            print(f"     {sentiment}: {count} ({count/total*100:.1f}%)")
             
             # Show sample daily sentiment
-            print(f"\n📋 Sample Daily Sentiment (last 5 days):")
-            sample_cols = ['date', 'compound_score_mean', 'positive_ratio', 'negative_ratio', 'article_count']
-            print(df_daily[sample_cols].tail())
+            print(f"\n📋 Sample Combined Daily Sentiment (last 5 records):")
+            sample_cols = ['date', 'symbol', 'compound_score_mean', 'positive_ratio', 'negative_ratio', 'article_count']
+            available_cols = [col for col in sample_cols if col in combined_daily.columns]
+            print(combined_daily[available_cols].tail())
             
             print(f"\n🚀 Next step: Integrate sentiment with stock price data!")
         else:
-            print("❌ Sentiment analysis failed")
+            print("❌ Sentiment analysis failed for all stocks")
             
     except Exception as e:
         print(f"❌ Error during sentiment analysis: {str(e)}")
