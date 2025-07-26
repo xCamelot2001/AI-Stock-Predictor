@@ -5,7 +5,7 @@ Financial News Data Collection Script
 Purpose: Collect financial news from multiple sources for sentiment analysis
 - Alpha Vantage News (finance-focused)
 - NewsAPI (broader coverage)
-- Filter for specific stocks (AAPL)
+- Filter for specific stocks (AAPL, MSFT, GOOGL, AMZN, NVDA)
 - Align with stock price dates
 
 Usage: python scripts/news_collection.py
@@ -33,7 +33,7 @@ class NewsCollector:
     - Alpha Vantage news (finance-specific)
     - NewsAPI (general news with financial filtering)
     - Date-based filtering
-    - Stock-specific news (AAPL focus)
+    - Stock-specific news (multi-stock support)
     """
     
     def __init__(self):
@@ -244,10 +244,20 @@ class NewsCollector:
         
         # 2. NewsAPI - Multiple queries for better coverage
         if self.newsapi_key:
+            # Get company name for better search results
+            company_names = {
+                'AAPL': 'Apple',
+                'MSFT': 'Microsoft', 
+                'GOOGL': 'Google',
+                'AMZN': 'Amazon',
+                'NVDA': 'NVIDIA'
+            }
+            company_name = company_names.get(symbol, symbol)
+            
             queries = [
                 f'{symbol} stock',
-                f'Apple AND (earnings OR revenue OR financial)',
-                f'Apple AND (stock OR shares OR market)'
+                f'{company_name} AND (earnings OR revenue OR financial)',
+                f'{company_name} AND (stock OR shares OR market)'
             ]
             
             for query in queries:
@@ -324,26 +334,37 @@ def main():
         print("NEWSAPI_KEY=your_key")
         return
     
-    # Collect news for AAPL
-    symbol = 'AAPL'
-    days_back = 30  # Last 30 days
+    # Collect news for all stocks
+    symbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA']
+    days_back = 90  # Last 3 months
     
-    logger.info(f"🚀 Starting news collection for {symbol}")
-    news_df = collector.collect_all_news(symbol, days_back)
+    logger.info(f"🚀 Starting news collection for {len(symbols)} stocks: {', '.join(symbols)}")
     
-    if news_df is not None:
-        print(f"\n✅ News collection successful!")
-        print(f"📊 Collected {len(news_df)} articles")
-        print(f"📁 Data saved in: data/news/")
+    total_articles = 0
+    successful_collections = 0
+    
+    for i, symbol in enumerate(symbols, 1):
+        logger.info(f"\n📊 Collecting news for {symbol} ({i}/{len(symbols)})")
         
-        # Show sample of collected news
-        print(f"\n📋 Sample articles:")
-        for i, row in news_df.head(3).iterrows():
-            print(f"   {i+1}. {row['title'][:80]}...")
+        news_df = collector.collect_all_news(symbol, days_back)
         
-        print(f"\n🚀 Next step: Sentiment analysis with FinBERT!")
-    else:
-        print("❌ News collection failed")
+        if news_df is not None:
+            successful_collections += 1
+            total_articles += len(news_df)
+            print(f"✅ {symbol}: {len(news_df)} articles collected")
+        else:
+            print(f"❌ {symbol}: News collection failed")
+        
+        # Add delay between stocks to respect API limits
+        if i < len(symbols):  # Don't wait after the last stock
+            logger.info("⏳ Waiting 15 seconds before next stock...")
+            time.sleep(15)
+    
+    print(f"\n🎉 Collection Summary:")
+    print(f"📊 Successfully collected from {successful_collections}/{len(symbols)} stocks")
+    print(f"📰 Total articles: {total_articles}")
+    print(f"📁 Data saved in: data/news/")
+    print(f"\n🚀 Next step: Sentiment analysis with FinBERT!")
 
 
 if __name__ == "__main__":

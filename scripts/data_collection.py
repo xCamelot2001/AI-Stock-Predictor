@@ -259,6 +259,7 @@ def main():
         "NVDA",   # NVIDIA Corporation
         "AMZN",   # Amazon.com Inc.
         "GOOGL",  # Alphabet Inc. (Google)
+        "SPY",    # S&P 500 ETF
     ]
     
     START_DATE = "2014-01-01"
@@ -267,14 +268,15 @@ def main():
         # Initialize collector
         collector = StockDataCollector()
         
-        # Run full pipeline
-        output_file = collector.run_full_pipeline(
-            tickers=TICKERS,
-            start_date=START_DATE,
-            collect_new=False  # Set to True to fetch new data
-        )
-        # Output result
-        print(f"\n✅ Success! Merged data saved to: {output_file}")
+        # Run full pipeline for all stocks (including SPY)
+        if TICKERS:
+            output_file = collector.run_full_pipeline(
+                tickers=TICKERS,
+                start_date=START_DATE,
+                collect_new=True  # Set to True to fetch new data
+            )
+            print(f"\n✅ Success! Merged data saved to: {output_file}")
+        
         print(f"📊 Ready for feature engineering and model training")
         
     except Exception as e:
