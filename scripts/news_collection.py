@@ -45,7 +45,7 @@ class NewsCollector:
         self.av_key = os.getenv('ALPHA_VANTAGE_API_KEY')
         self.newsapi_key = os.getenv('NEWSAPI_KEY')
         self.finnhub_key = os.getenv('FINNHUB_API_KEY')
-        self.thenewsapi_key = os.getenv('THENEWSAPI_KEY')
+        self.thenewsapi_key = os.getenv('THE_NEWS_API_KEY')
         
         if not self.av_key:
             logger.warning("⚠️  Alpha Vantage API key not found")
@@ -508,7 +508,7 @@ def main():
         print("ALPHA_VANTAGE_API_KEY=your_key")
         print("NEWSAPI_KEY=your_key")
         print("FINNHUB_API_KEY=your_key")
-        print("THENEWSAPI_KEY=your_key")
+        print("THE_NEWS_API_KEY=your_key")
         return
     
     # Collect news for all stocks
